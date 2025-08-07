@@ -17,6 +17,7 @@ package model
 import (
 	"errors"
 	"strings"
+	"sync"
 
 	"github.com/casbin/casbin/v2/log"
 	"github.com/casbin/casbin/v2/rbac"
@@ -30,7 +31,7 @@ type Assertion struct {
 	Tokens        []string
 	ParamsTokens  []string
 	Policy        [][]string
-	PolicyMap     map[string]int
+	PolicyMap     sync.Map
 	RM            rbac.RoleManager
 	CondRM        rbac.ConditionalRoleManager
 	FieldIndexMap map[string]int
@@ -176,19 +177,19 @@ func (ast *Assertion) copy() *Assertion {
 	for i, p := range ast.Policy {
 		policy[i] = append(policy[i], p...)
 	}
-	policyMap := make(map[string]int)
-	for k, v := range ast.PolicyMap {
-		policyMap[k] = v
-	}
 
 	newAst := &Assertion{
 		Key:           ast.Key,
 		Value:         ast.Value,
-		PolicyMap:     policyMap,
 		Tokens:        tokens,
 		Policy:        policy,
 		FieldIndexMap: ast.FieldIndexMap,
 	}
+
+	ast.PolicyMap.Range(func(key, value interface{}) bool {
+        newAst.PolicyMap.Store(key, value)
+        return true
+    })
 
 	return newAst
 }

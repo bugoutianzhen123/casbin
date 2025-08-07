@@ -17,6 +17,7 @@ package model
 import (
 	"fmt"
 	"strconv"
+
 	"strings"
 
 	"github.com/casbin/casbin/v2/constant"
@@ -124,12 +125,17 @@ func (model Model) PrintPolicy() {
 func (model Model) ClearPolicy() {
 	for _, ast := range model["p"] {
 		ast.Policy = nil
-		ast.PolicyMap = map[string]int{}
+		ast.PolicyMap.Range(func(key, value interface{}) bool {
+			ast.PolicyMap.Delete(key)
+			return true
+		})
 	}
-
 	for _, ast := range model["g"] {
 		ast.Policy = nil
-		ast.PolicyMap = map[string]int{}
+		ast.PolicyMap.Range(func(key, value interface{}) bool {
+			ast.PolicyMap.Delete(key)
+			return true
+		})
 	}
 }
 
@@ -200,7 +206,7 @@ func (model Model) HasPolicy(sec string, ptype string, rule []string) (bool, err
 	if err != nil {
 		return false, err
 	}
-	_, ok := model[sec][ptype].PolicyMap[strings.Join(rule, DefaultSep)]
+	_, ok := model[sec][ptype].PolicyMap.Load(strings.Join(rule, DefaultSep))
 	return ok, nil
 }
 
@@ -226,7 +232,7 @@ func (model Model) AddPolicy(sec string, ptype string, rule []string) error {
 		return err
 	}
 	assertion.Policy = append(assertion.Policy, rule)
-	assertion.PolicyMap[strings.Join(rule, DefaultSep)] = len(model[sec][ptype].Policy) - 1
+	assertion.PolicyMap.Store(strings.Join(rule, DefaultSep), len(assertion.Policy)-1)
 
 	hasPriority := false
 	if _, ok := assertion.FieldIndexMap[constant.PriorityIndex]; ok {
@@ -241,10 +247,10 @@ func (model Model) AddPolicy(sec string, ptype string, rule []string) error {
 					break
 				}
 				assertion.Policy[i] = assertion.Policy[i-1]
-				assertion.PolicyMap[strings.Join(assertion.Policy[i-1], DefaultSep)]++
+				assertion.PolicyMap.Store(strings.Join(assertion.Policy[i-1], DefaultSep), i)
 			}
 			assertion.Policy[i] = rule
-			assertion.PolicyMap[strings.Join(rule, DefaultSep)] = i
+			assertion.PolicyMap.Store(strings.Join(rule, DefaultSep), i)
 		}
 	}
 	return nil
@@ -265,7 +271,7 @@ func (model Model) AddPoliciesWithAffected(sec string, ptype string, rules [][]s
 	var affected [][]string
 	for _, rule := range rules {
 		hashKey := strings.Join(rule, DefaultSep)
-		_, ok := model[sec][ptype].PolicyMap[hashKey]
+		_, ok := model[sec][ptype].PolicyMap.Load(hashKey)
 		if ok {
 			continue
 		}
@@ -286,19 +292,20 @@ func (model Model) RemovePolicy(sec string, ptype string, rule []string) (bool, 
 		return false, err
 	}
 	key := strings.Join(rule, DefaultSep)
-	index, ok := ast.PolicyMap[key]
+	indexVal, ok := ast.PolicyMap.Load(key)
 	if !ok {
 		return false, nil
 	}
+	index := indexVal.(int)
 
 	lastIdx := len(ast.Policy) - 1
 	if index != lastIdx {
 		ast.Policy[index] = ast.Policy[lastIdx]
 		lastPolicyKey := strings.Join(ast.Policy[index], DefaultSep)
-		ast.PolicyMap[lastPolicyKey] = index
+		ast.PolicyMap.Store(lastPolicyKey, index)
 	}
 	ast.Policy = ast.Policy[:lastIdx]
-	delete(ast.PolicyMap, key)
+	ast.PolicyMap.Delete(key)
 	return true, nil
 }
 
@@ -309,14 +316,15 @@ func (model Model) UpdatePolicy(sec string, ptype string, oldRule []string, newR
 		return false, err
 	}
 	oldPolicy := strings.Join(oldRule, DefaultSep)
-	index, ok := model[sec][ptype].PolicyMap[oldPolicy]
+	indexVal, ok := model[sec][ptype].PolicyMap.Load(oldPolicy)
 	if !ok {
 		return false, nil
 	}
+	index := indexVal.(int)
 
 	model[sec][ptype].Policy[index] = newRule
-	delete(model[sec][ptype].PolicyMap, oldPolicy)
-	model[sec][ptype].PolicyMap[strings.Join(newRule, DefaultSep)] = index
+	model[sec][ptype].PolicyMap.Delete(oldPolicy)
+	model[sec][ptype].PolicyMap.Store(strings.Join(newRule, DefaultSep), index)
 
 	return true, nil
 }
@@ -337,8 +345,8 @@ func (model Model) UpdatePolicies(sec string, ptype string, oldRules, newRules [
 				model[sec][ptype].Policy[index] = oldRules[oldNewIndex[0]]
 				oldPolicy := strings.Join(oldRules[oldNewIndex[0]], DefaultSep)
 				newPolicy := strings.Join(newRules[oldNewIndex[1]], DefaultSep)
-				delete(model[sec][ptype].PolicyMap, newPolicy)
-				model[sec][ptype].PolicyMap[oldPolicy] = index
+				model[sec][ptype].PolicyMap.Delete(newPolicy)
+				model[sec][ptype].PolicyMap.Store(oldPolicy, index)
 			}
 		}
 	}()
@@ -346,15 +354,16 @@ func (model Model) UpdatePolicies(sec string, ptype string, oldRules, newRules [
 	newIndex := 0
 	for oldIndex, oldRule := range oldRules {
 		oldPolicy := strings.Join(oldRule, DefaultSep)
-		index, ok := model[sec][ptype].PolicyMap[oldPolicy]
+		indexVal, ok := model[sec][ptype].PolicyMap.Load(oldPolicy)
 		if !ok {
 			rollbackFlag = true
 			return false, nil
 		}
+		index := indexVal.(int)
 
 		model[sec][ptype].Policy[index] = newRules[newIndex]
-		delete(model[sec][ptype].PolicyMap, oldPolicy)
-		model[sec][ptype].PolicyMap[strings.Join(newRules[newIndex], DefaultSep)] = index
+		model[sec][ptype].PolicyMap.Delete(oldPolicy)
+		model[sec][ptype].PolicyMap.Store(strings.Join(newRules[newIndex], DefaultSep), index)
 		modifiedRuleIndex[index] = []int{oldIndex, newIndex}
 		newIndex++
 	}
@@ -376,16 +385,17 @@ func (model Model) RemovePoliciesWithAffected(sec string, ptype string, rules []
 	}
 	var affected [][]string
 	for _, rule := range rules {
-		index, ok := model[sec][ptype].PolicyMap[strings.Join(rule, DefaultSep)]
+		indexVal, ok := model[sec][ptype].PolicyMap.Load(strings.Join(rule, DefaultSep))
 		if !ok {
 			continue
 		}
+		index := indexVal.(int)
 
 		affected = append(affected, rule)
 		model[sec][ptype].Policy = append(model[sec][ptype].Policy[:index], model[sec][ptype].Policy[index+1:]...)
-		delete(model[sec][ptype].PolicyMap, strings.Join(rule, DefaultSep))
+		model[sec][ptype].PolicyMap.Delete(strings.Join(rule, DefaultSep))
 		for i := index; i < len(model[sec][ptype].Policy); i++ {
-			model[sec][ptype].PolicyMap[strings.Join(model[sec][ptype].Policy[i], DefaultSep)] = i
+			model[sec][ptype].PolicyMap.Store(strings.Join(model[sec][ptype].Policy[i], DefaultSep), i)
 		}
 	}
 	return affected, nil
@@ -400,7 +410,10 @@ func (model Model) RemoveFilteredPolicy(sec string, ptype string, fieldIndex int
 	var tmp [][]string
 	var effects [][]string
 	res := false
-	model[sec][ptype].PolicyMap = map[string]int{}
+	model[sec][ptype].PolicyMap.Range(func(key, value interface{}) bool {
+		model[sec][ptype].PolicyMap.Delete(key)
+		return true
+	})
 
 	for _, rule := range model[sec][ptype].Policy {
 		matched := true
@@ -415,7 +428,7 @@ func (model Model) RemoveFilteredPolicy(sec string, ptype string, fieldIndex int
 			effects = append(effects, rule)
 		} else {
 			tmp = append(tmp, rule)
-			model[sec][ptype].PolicyMap[strings.Join(rule, DefaultSep)] = len(tmp) - 1
+			model[sec][ptype].PolicyMap.Store(strings.Join(rule, DefaultSep), len(tmp)-1)
 		}
 	}
 

@@ -75,7 +75,6 @@ func (model Model) AddDef(sec string, key string, value string) bool {
 	ast := Assertion{}
 	ast.Key = key
 	ast.Value = value
-	ast.PolicyMap = make(map[string]int)
 	ast.FieldIndexMap = make(map[string]int)
 	ast.setLogger(model.GetLogger())
 
@@ -273,7 +272,7 @@ func (model Model) SortPoliciesBySubjectHierarchy() error {
 			return p1 > p2
 		})
 		for i, policy := range assertion.Policy {
-			assertion.PolicyMap[strings.Join(policy, ",")] = i
+			assertion.PolicyMap.Store(strings.Join(policy, ","), i)
 		}
 	}
 	return nil
@@ -353,7 +352,7 @@ func (model Model) SortPoliciesByPriority() error {
 			return p1 < p2
 		})
 		for i, policy := range assertion.Policy {
-			assertion.PolicyMap[strings.Join(policy, ",")] = i
+			assertion.PolicyMap.Store(strings.Join(policy, ","), i)
 		}
 	}
 	return nil
